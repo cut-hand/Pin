@@ -28,17 +28,6 @@ final class MirrorWindowController: NSObject {
     /// Callback when target window geometry changes (for updating capture size)
     var onGeometryChange: ((CGSize) -> Void)?
 
-    /// Callback when unpin button is clicked
-    var onUnpin: (() -> Void)?
-
-    /// Separate window for pin button (always clickable even when mirror ignores events)
-    private var pinButtonWindow: NSWindow?
-    private var pinButton: PinButtonView?
-
-    /// Pin button size and offset constants
-    private let pinSize: CGFloat = 72
-    private let pinOffset: CGFloat = -16
-
     /// Access to the capture manager for external control
     var capture: WindowCaptureManager { captureManager }
 
@@ -65,21 +54,17 @@ final class MirrorWindowController: NSObject {
         window?.orderFront(nil)
         window?.hasShadow = true
 
-        // Show pin button window
-        pinButtonWindow?.orderFront(nil)
-
         // Start geometry synchronization
         startGeometrySync()
     }
 
     /// Hide the mirror window (for hover model)
     /// Makes video layer transparent and ignores mouse events so clicks pass through
-    /// Pin button remains visible for user to unpin
     /// Uses global mouse monitoring to detect when to unhide
     func hideMirror() {
         print("hide")
         window?.hasShadow = false
-        // Make video layer transparent (not the whole window, so pin stays visible)
+        // Make the captured content transparent while interacting with the original.
         captureManager.videoLayer.opacity = 0
         // Allow clicks to pass through to the window below
         window?.ignoresMouseEvents = true
@@ -121,7 +106,6 @@ final class MirrorWindowController: NSObject {
         // 2. Clear all callbacks to prevent calls during teardown
         onHoverChanged = nil
         onGeometryChange = nil
-        onUnpin = nil
 
         // 3. Prepare hover view for removal (clears tracking area and callback)
         hoverView?.prepareForRemoval()
@@ -129,21 +113,17 @@ final class MirrorWindowController: NSObject {
         // 4. Remove video layer from hierarchy before any window operations
         captureManager.videoLayer.removeFromSuperlayer()
 
-        // 5. Remove hover view and pin button from superview explicitly
+        // 5. Remove hover view from superview explicitly
         hoverView?.removeFromSuperview()
-        pinButton?.removeFromSuperview()
 
-        // 6. Hide the windows immediately (orderOut, not close)
+        // 6. Hide the window immediately (orderOut, not close)
         // Don't call close() - it triggers dealloc while animations may still reference the window
         window?.orderOut(nil)
-        pinButtonWindow?.orderOut(nil)
 
         // 7. Clear our references - ARC will deallocate the window
         // when all references (including animation blocks) are gone
         window = nil
         hoverView = nil
-        pinButton = nil
-        pinButtonWindow = nil
     }
 
     /// Attach the video layer to the window
@@ -289,47 +269,6 @@ final class MirrorWindowController: NSObject {
 
         self.window = window
         self.hoverView = hoverView
-
-        // Create separate pin button window (always clickable)
-        createPinButtonWindow(relativeTo: frame)
-    }
-
-    private func createPinButtonWindow(relativeTo mirrorFrame: NSRect) {
-        // Calculate pin button position in screen coordinates
-        // Pin is positioned at top-left corner with offset, shifted up by 36px
-        let pinFrame = NSRect(
-            x: mirrorFrame.origin.x + pinOffset,
-            y: mirrorFrame.origin.y + mirrorFrame.height - pinSize - pinOffset + 18,
-            width: pinSize,
-            height: pinSize
-        )
-
-        // Create borderless window for pin button
-        let pinWindow = NSWindow(
-            contentRect: pinFrame,
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-
-        // Level above the mirror window
-        pinWindow.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
-        pinWindow.isOpaque = false
-        pinWindow.backgroundColor = .clear
-        pinWindow.hasShadow = false
-        pinWindow.ignoresMouseEvents = false  // Always clickable
-        pinWindow.collectionBehavior = [.canJoinAllSpaces, .stationary]
-
-        // Create pin button view
-        let pinButton = PinButtonView(frame: NSRect(origin: .zero, size: pinFrame.size))
-        pinButton.autoresizingMask = [.width, .height]
-        pinButton.onClicked = { [weak self] in
-            self?.onUnpin?()
-        }
-        pinWindow.contentView = pinButton
-
-        self.pinButtonWindow = pinWindow
-        self.pinButton = pinButton
     }
 
     private func convertToScreenFrame(_ cgRect: CGRect) -> NSRect {
@@ -420,24 +359,11 @@ final class MirrorWindowController: NSObject {
             }
         }
 
-        // Update pin button window position
-        updatePinButtonPosition(relativeTo: frame)
-
         // Update video layer frame
         updateVideoLayerFrame()
 
         // Notify about geometry change for capture size update
         onGeometryChange?(bounds.size)
-    }
-
-    private func updatePinButtonPosition(relativeTo mirrorFrame: NSRect) {
-        let pinFrame = NSRect(
-            x: mirrorFrame.origin.x + pinOffset,
-            y: mirrorFrame.origin.y + mirrorFrame.height - pinSize - pinOffset + 18,
-            width: pinSize,
-            height: pinSize
-        )
-        pinButtonWindow?.setFrame(pinFrame, display: true, animate: false)
     }
 }
 
@@ -568,96 +494,6 @@ private class GeometryObserver {
         if bounds != lastBounds {
             lastBounds = bounds
             onBoundsChange?(bounds)
-        }
-    }
-}
-
-// MARK: - Pin Button View
-
-/// Button view that displays a pin icon and handles click events
-private class PinButtonView: NSView {
-
-    var onClicked: (() -> Void)?
-
-    private var imageView: NSImageView?
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setupView()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setupView()
-    }
-
-    private func setupView() {
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-
-        // Create image view for pin icon
-        let imageView = NSImageView(frame: bounds)
-        imageView.autoresizingMask = [.width, .height]
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.image = NSImage(named: "PinIcon")
-        addSubview(imageView)
-        self.imageView = imageView
-
-        // Set up tracking area for hover detection
-        setupTrackingArea()
-    }
-
-    private func setupTrackingArea() {
-        if let existingArea = trackingArea {
-            removeTrackingArea(existingArea)
-        }
-
-        let newTrackingArea = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(newTrackingArea)
-        trackingArea = newTrackingArea
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        setupTrackingArea()
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // Visual feedback on click
-        alphaValue = 0.7
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        alphaValue = isHovered ? 0.9 : 1.0
-
-        // Check if mouse is still inside the button
-        let locationInView = convert(event.locationInWindow, from: nil)
-        if bounds.contains(locationInView) {
-            onClicked?()
-        }
-    }
-
-    private func updateAppearance() {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            self.animator().alphaValue = isHovered ? 0.9 : 1.0
         }
     }
 }

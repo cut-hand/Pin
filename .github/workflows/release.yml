@@ -5,296 +5,45 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      create_release:
-        description: 'Create a release'
-        required: false
-        default: 'false'
-        type: boolean
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: macos-latest
     permissions:
       contents: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Import Code Signing Certificate
-        env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Build universal app and verify signature
+        shell: bash
         run: |
-          # Create temporary keychain
-          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Import certificate
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
-
-          security import "$CERTIFICATE_PATH" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
-
-          # Save keychain path for later steps
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
-
-      - name: Set Version from Tag
-        run: |
-          INFO_PLIST="pin-agent/Pin/Info.plist"
-
-          # Extract version from tag (e.g., v0.1.0 -> 0.1.0)
-          if [[ "$GITHUB_REF_NAME" =~ ^v ]]; then
-            MARKETING_VERSION=${GITHUB_REF_NAME#v}
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            scripts/build-release.sh "$GITHUB_REF_NAME"
           else
-            MARKETING_VERSION="0.0.0-dev"
+            scripts/build-release.sh v0.1.4-no-badge.1
           fi
 
-          BUILD_NUMBER="${{ github.run_number }}"
-
-          # Set CFBundleShortVersionString (MARKETING_VERSION)
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$INFO_PLIST"
-
-          # Set CFBundleVersion (CURRENT_PROJECT_VERSION) to run number
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFO_PLIST"
-
-          echo "MARKETING_VERSION=$MARKETING_VERSION" >> $GITHUB_ENV
-          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
-          echo "Set version to $MARKETING_VERSION (build $BUILD_NUMBER)"
-
-      - name: Build
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          cd pin-agent
-
-          xcodebuild -project Pin.xcodeproj \
-            -scheme Pin \
-            -configuration Release \
-            -derivedDataPath build \
-            ARCHS="arm64 x86_64" \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH --timestamp" \
-            build
-
-      - name: Sign Sparkle Components
-        run: |
-          APP_PATH="pin-agent/build/Build/Products/Release/Pin.app"
-          SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework"
-
-          if [ -d "$SPARKLE_FRAMEWORK" ]; then
-            echo "Signing Sparkle components..."
-
-            # Sign all Mach-O binaries inside Sparkle.framework (inside-out order)
-            # Find all executable files and sign them
-            find "$SPARKLE_FRAMEWORK" -type f -perm +111 | while read binary; do
-              # Check if it's a Mach-O binary
-              if file "$binary" | grep -q "Mach-O"; then
-                echo "Signing binary: $binary"
-                codesign --force --options runtime --sign "Developer ID Application" \
-                  --keychain "$KEYCHAIN_PATH" --timestamp "$binary"
-              fi
-            done
-
-            # Sign XPC services
-            find "$SPARKLE_FRAMEWORK" -name "*.xpc" -type d | while read xpc; do
-              echo "Signing XPC: $xpc"
-              codesign --force --options runtime --sign "Developer ID Application" \
-                --keychain "$KEYCHAIN_PATH" --timestamp "$xpc"
-            done
-
-            # Sign helper apps (Updater.app, etc.)
-            find "$SPARKLE_FRAMEWORK" -name "*.app" -type d | while read app; do
-              echo "Signing app: $app"
-              codesign --force --options runtime --sign "Developer ID Application" \
-                --keychain "$KEYCHAIN_PATH" --timestamp "$app"
-            done
-
-            # Sign Sparkle framework itself
-            echo "Signing Sparkle.framework"
-            codesign --force --options runtime --sign "Developer ID Application" \
-              --keychain "$KEYCHAIN_PATH" --timestamp "$SPARKLE_FRAMEWORK"
-
-            echo "Sparkle components signed successfully"
-          else
-            echo "Sparkle.framework not found, skipping..."
-          fi
-
-      - name: Prepare App for Notarization
-        run: |
-          APP_PATH="pin-agent/build/Build/Products/Release/Pin.app"
-          ZIP_PATH="$RUNNER_TEMP/Pin.zip"
-
-          # Create zip for notarization
-          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-
-          echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
-          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
-
-      - name: Notarize App
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # Submit for notarization and capture the submission ID
-          SUBMIT_OUTPUT=$(xcrun notarytool submit "$ZIP_PATH" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait 2>&1)
-
-          echo "$SUBMIT_OUTPUT"
-
-          # Extract submission ID
-          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -o 'id: [a-f0-9-]*' | head -1 | cut -d' ' -f2)
-          echo "SUBMISSION_ID=$SUBMISSION_ID" >> $GITHUB_ENV
-
-          # Check if notarization was successful
-          if echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
-            echo "Notarization successful!"
-          else
-            echo "Notarization may have failed. Fetching log..."
-            xcrun notarytool log "$SUBMISSION_ID" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_ID_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" || true
-            exit 1
-          fi
-
-      - name: Staple Notarization Ticket
-        run: |
-          # Wait a moment for Apple's servers to propagate the ticket
-          echo "Waiting for notarization ticket to propagate..."
-          sleep 10
-
-          # Retry stapling up to 3 times
-          for i in 1 2 3; do
-            echo "Staple attempt $i..."
-            if xcrun stapler staple "$APP_PATH"; then
-              echo "Stapling successful!"
-              exit 0
-            fi
-            echo "Staple failed, waiting before retry..."
-            sleep 30
-          done
-
-          echo "Stapling failed after 3 attempts"
-          exit 1
-
-      - name: Create Release Archive
-        run: |
-          VERSION=${GITHUB_REF_NAME:-dev}
-          RELEASE_ZIP="Pin-${VERSION}.zip"
-
-          ditto -c -k --keepParent "$APP_PATH" "$RELEASE_ZIP"
-
-          echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - name: Verify Code Signature
-        run: |
-          echo "=== Code Signature ==="
-          codesign -dv --verbose=4 "$APP_PATH"
-
-          echo ""
-          echo "=== Gatekeeper Assessment ==="
-          spctl --assess --verbose=4 "$APP_PATH" || true
-
-      - name: Cleanup Keychain
-        if: always()
-        run: |
-          if [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH" || true
-          fi
-
-      - name: Upload Artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Pin-${{ env.VERSION }}
-          path: ${{ env.RELEASE_ZIP }}
+          name: Pin-no-badge-macos-universal
+          path: |
+            build/releases/**/*.zip
+            build/releases/**/*.sha256
 
-      - name: Generate appcast.xml
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          # Find generate_appcast tool
-          echo "Searching for generate_appcast tool..."
-          GENERATE_APPCAST=$(find pin-agent/build -name "generate_appcast" -type f 2>/dev/null | head -1)
-          echo "Found generate_appcast at: $GENERATE_APPCAST"
-
-          if [ -x "$GENERATE_APPCAST" ] && [ -n "$SPARKLE_PRIVATE_KEY" ]; then
-            # Create a directory for releases
-            mkdir -p releases
-            cp "$RELEASE_ZIP" releases/
-
-            # Set download URL prefix for GitHub Releases (trailing slash required)
-            DOWNLOAD_URL_PREFIX="https://github.com/southflowpeak/Pin/releases/download/${GITHUB_REF_NAME}/"
-
-            # Generate appcast.xml using generate_appcast
-            "$GENERATE_APPCAST" \
-              --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY") \
-              --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
-              -o appcast.xml \
-              releases/
-
-            echo "appcast.xml generated successfully"
-            cat appcast.xml
-          else
-            echo "Error: generate_appcast tool not found or SPARKLE_PRIVATE_KEY not set"
-            exit 1
-          fi
-
-      - name: Commit appcast.xml to main
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
-        run: |
-          # Save generated appcast.xml
-          cp appcast.xml /tmp/appcast.xml.generated
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull origin main
-
-          # Restore generated appcast.xml
-          cp /tmp/appcast.xml.generated appcast.xml
-
-          git add appcast.xml
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "chore: update appcast.xml for ${GITHUB_REF_NAME}"
-          git push origin main
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.RELEASE_ZIP }}
-            appcast.xml
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Pin $GITHUB_REF_NAME — 无钉子版" \
+            --notes-file docs/release-notes/no-badge.md \
+            build/releases/"$GITHUB_REF_NAME"/*.zip \
+            build/releases/"$GITHUB_REF_NAME"/*.sha256

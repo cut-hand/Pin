@@ -128,9 +128,6 @@ final class AgentStateMachine {
                 screen: screen
             )
         }
-        mirrorController.onUnpin = { [weak self] in
-            self?.unpin()
-        }
 
         // Apply saved opacity
         mirrorController.setOpacity(savedOpacity)
@@ -214,7 +211,6 @@ final class AgentStateMachine {
         // 2. Clear callbacks to prevent calls during teardown
         mirrorWindowController?.onHoverChanged = nil
         mirrorWindowController?.onGeometryChange = nil
-        mirrorWindowController?.onUnpin = nil
 
         // 3. Stop capture first (invalidates stream output to stop callbacks)
         // This must happen before closing the mirror window
