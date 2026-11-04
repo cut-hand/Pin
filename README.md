@@ -1,83 +1,39 @@
-# Pin — 无钉子版
+# Pin
 
-基于 [southflowpeak/Pin](https://github.com/southflowpeak/Pin) 的个人分支。移除置顶窗口上的钉子按钮，保留菜单栏操作。
+Mac 窗口置顶工具。**v0.1.4 起仅支持 Apple 芯片，要求 macOS 15.2 或更新版本。**
 
-<p align="center">
-  <img src="pin-agent/Pin/Resources/Assets.xcassets/AppIcon.appiconset/pin-macOS-128x128@2x.png" width="128" height="128" alt="Pin App Icon">
-</p>
+基于 [southflowpeak/Pin](https://github.com/southflowpeak/Pin) 重写。窗口上不显示钉子，也没有额外的透明按钮覆盖内容。
 
-<p align="center">
-  <strong>Keep any window always on top on macOS</strong>
-</p>
+[下载最新版](https://github.com/cut-hand/Pin/releases/latest) · [下载旧版 v0.1.3（支持 Intel，macOS 14+）](https://github.com/southflowpeak/Pin/releases/tag/v0.1.3)
 
----
+## 使用
 
-## 🎬 How it works
+1. 下载 `Pin-v0.1.4-macos-arm64.zip`，解压后将 `Pin.app` 放入“应用程序”。先退出原版 Pin，再启动新版。
+2. 点击菜单栏图标，选择“选择窗口置顶…”，用系统选窗器选择一个窗口。
+3. 点击置顶画面可切回原应用操作；鼠标移出后恢复置顶。窗口会跟随原窗口移动和缩放。
+4. 菜单栏中可以调整透明度或“取消置顶”。
 
-See Pin in action: [southflowpeak.com/pin](https://southflowpeak.com/pin)
+系统选窗器只捕获你选择的窗口，不申请辅助功能权限。画面仅在本机处理，不保存或上传。
 
-## ✨ Features
+安装包使用 ad-hoc 签名，未经 Apple 公证。如果系统阻止打开，可到“系统设置 → 隐私与安全性”允许打开。
 
-- 🪟 **Pin Any Window** - Select any window and keep it always visible on top
-- 🔍 **Adjustable Opacity** - Make pinned windows semi-transparent (10% - 100%) to see through them
-- 📋 **Menu Bar Control** - Easily select and manage windows from the menu bar
-- 🧼 **No Window Badge** - No pin icon or invisible button over the pinned window
-- 🔔 **Manual Updates** - Check for Updates opens this fork’s GitHub Releases; no upstream auto-update
+## 开发
 
-## 📥 Installation
-
-### Download
-
-👉 [**下载无钉子版 / Download**](https://github.com/cut-hand/Pin/releases/latest)
-
-安装包同时支持 Apple 芯片和 Intel Mac。解压后将 `Pin.app` 放入“应用程序”，先退出原版再启动。此版本使用 ad-hoc 签名，未经 Apple 公证；若系统拦截，请到“系统设置 → 隐私与安全性”允许打开。首次使用可能需要重新授予屏幕录制权限。
-
-### System Requirements
-
-- macOS 14.0 (Sonoma) or later
-
-### 🔐 Screen Recording Permission
-
-Pin requires **Screen Recording** permission to function.
-
-<p align="center">
-  <img src="docs/images/screen-recording-dialog.png" width="400" alt="Screen Recording Permission Dialog">
-</p>
-
-On first launch, you'll see the dialog above. Click "Open System Settings" and enable Pin in the Privacy & Security settings.
-
-<p align="center">
-  <img src="docs/images/screen-recording-settings.png" width="400" alt="Screen Recording Settings">
-</p>
-
-#### 💡 Why is Screen Recording permission required?
-
-Pin uses macOS's **ScreenCaptureKit API** to keep windows on top:
-
-1. **SCStream** captures the target window's content in real-time
-2. The captured frames are displayed using **AVSampleBufferDisplayLayer**
-3. This layer is placed in a floating window set to `NSWindow.Level.floating`
-
-This creates a "mirror window" that stays on top even when the original window is behind other windows. Since ScreenCaptureKit is used to capture window content, macOS requires Screen Recording permission.
-
-## 🚀 Usage
-
-1. Click the 📌 icon in the menu bar
-2. Select "Pin Window..." and choose the window you want to pin
-3. To unpin, select **Unpin** from the menu bar. The pinned window has no extra pin button.
-
-## Build
-
-Requires macOS and the Xcode Command Line Tools (`xcode-select --install`). No third-party frameworks or signing certificates are needed.
+使用 Swift 6、Swift Package Manager、AppKit、ScreenCaptureKit 和 AVFoundation，无第三方依赖。
 
 ```sh
-scripts/build-release.sh v0.1.4-no-badge.1
+swift test --arch arm64 -Xswiftc -warnings-as-errors
+scripts/build-release.sh v0.1.4
 ```
 
-Output: `build/releases/v0.1.4-no-badge.1/Pin.app`, a universal ZIP, and its SHA-256 checksum. Each build uses a fresh version directory.
+安装 Xcode Command Line Tools（`xcode-select --install`）即可构建，工具链需支持 Swift 6。输出位于 `build/releases/v0.1.4/`，包含应用、ZIP 和 SHA-256 校验文件。每个版本使用新的输出目录。
 
-Pushing a `v*` tag runs the same build in GitHub Actions and publishes the ZIP and checksum as a Release. Builds are ad-hoc signed and are not notarized by Apple.
+源码只有四个文件：菜单与生命周期、捕获会话、视频视图、窗口坐标计算。捕获和启动均使用 `async/await`；UI 在主 actor 上运行，视频回调在主队列同步消费，不跨 actor 传递视频帧。
 
-## 📄 License
+推送 `v*` 标签会运行测试、仅构建 arm64，并生成 Release。“检查更新…”只打开本仓库的发布页面，不自动替换应用。
 
-MIT License
+[v0.1.3](https://github.com/southflowpeak/Pin/releases/tag/v0.1.3) 保留上游原版；后续版本均仅支持 Apple 芯片。
+
+## 许可证
+
+沿用原项目的 MIT License，原作者及提交历史保留在 Git 记录中。

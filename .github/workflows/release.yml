@@ -17,19 +17,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build universal app and verify signature
+      - name: Run Swift 6 tests
+        run: swift test --arch arm64 -Xswiftc -warnings-as-errors
+
+      - name: Build Apple Silicon app
         shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             scripts/build-release.sh "$GITHUB_REF_NAME"
           else
-            scripts/build-release.sh v0.1.4-no-badge.1
+            scripts/build-release.sh v0.1.4
           fi
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Pin-no-badge-macos-universal
+          name: Pin-macos-arm64
           path: |
             build/releases/**/*.zip
             build/releases/**/*.sha256
@@ -40,10 +42,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "Pin $GITHUB_REF_NAME — 无钉子版" \
-            --notes-file docs/release-notes/no-badge.md \
-            build/releases/"$GITHUB_REF_NAME"/*.zip \
-            build/releases/"$GITHUB_REF_NAME"/*.sha256
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Pin $GITHUB_REF_NAME" \
+              --notes-file docs/release-notes/apple-silicon.md \
+              build/releases/"$GITHUB_REF_NAME"/*.zip \
+              build/releases/"$GITHUB_REF_NAME"/*.sha256
+          fi
