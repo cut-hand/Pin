@@ -3,6 +3,7 @@ import ScreenCaptureKit
 
 @MainActor
 final class PinSession {
+    var id: CGWindowID { source.windowID }
     let title: String
     var opacity: Double {
         didSet { refreshVisibility() }
@@ -54,6 +55,7 @@ final class PinSession {
             self.onEnd?()
         }
         view.onClick = { [weak self] in self?.beginInteraction() }
+        view.onUnpin = { [weak self] in self?.onEnd?() }
         refreshVisibility()
     }
 
@@ -85,12 +87,17 @@ final class PinSession {
         monitor = nil
         output.onStop = nil
         view.onClick = nil
+        view.onUnpin = nil
         panel.orderOut(nil)
         if capturing {
             capturing = false
             // Retain the view/output until ScreenCaptureKit finishes queued callbacks.
             Task { try? await stream.stopCapture() }
         }
+    }
+
+    func setStackRank(_ rank: Int) {
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + rank)
     }
 
     private func synchronize() async {

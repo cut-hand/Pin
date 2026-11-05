@@ -5,18 +5,11 @@ import ScreenCaptureKit
 #error("Pin v0.1.4 and later require Apple silicon.")
 #endif
 
-// The Objective-C picker filter has no Sendable conformance. After selection we
-// treat it as immutable and use it only on MainActor, never editing its properties.
-private struct PickerSelection: @unchecked Sendable {
-    let filter: SCContentFilter
-}
-
-@main
-@MainActor
+@main @MainActor
 enum PinApp {
     static func main() {
         if CommandLine.arguments.contains("--version") {
-            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.4")
+            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.5")
             return
         }
         let app = NSApplication.shared
@@ -28,130 +21,142 @@ enum PinApp {
 }
 
 @MainActor
-final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate, SCContentSharingPickerObserver {
+final class AppController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var session: PinSession?
-    private var selection: Task<Void, Never>?
-    private var opacity = WindowGeometry.opacity(UserDefaults.standard.object(forKey: "opacity") as? Double ?? 1)
+    private let popover = NSPopover()
+    private let manager = WindowManagerViewController()
+    private var sessions: [PinSession] = []
+    private var starts: [CGWindowID: Task<Void, Never>] = [:]
+    private var choosing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem?.button?.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin")
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem?.menu = menu
-
-        let picker = SCContentSharingPicker.shared
-        var config = SCContentSharingPickerConfiguration()
-        config.allowedPickerModes = .singleWindow
-        config.excludedBundleIDs = [Bundle.main.bundleIdentifier ?? "io.github.cut-hand.Pin"]
-        config.allowsChangingSelectedContent = false
-        picker.defaultConfiguration = config
-        picker.maximumStreamCount = 1
-        picker.add(self)
-        picker.isActive = true
+        statusItem?.button?.target = self
+        statusItem?.button?.action = #selector(toggleManager)
+        popover.behavior = .transient
+        popover.contentViewController = manager
+        manager.onAdd = { [weak self] in self?.chooseWindow() }
+        manager.onRemove = { [weak self] id in self?.remove(id) }
+        manager.onRemoveAll = { [weak self] in self?.removeAll() }
+        manager.onMove = { [weak self] id, row in self?.move(id, to: row) }
+        refresh()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        unpin()
-        SCContentSharingPicker.shared.isActive = false
-        SCContentSharingPicker.shared.remove(self)
+    func applicationWillTerminate(_ notification: Notification) { removeAll() }
+
+    @objc private func toggleManager() {
+        guard let button = statusItem?.button else { return }
+        if popover.isShown { popover.performClose(nil) }
+        else { refresh(); popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        if let session {
-            let title = menu.addItem(withTitle: session.title, action: nil, keyEquivalent: "")
-            title.isEnabled = false
-            add("取消置顶", action: #selector(unpin), to: menu, key: "u")
-            menu.addItem(.separator())
-            let label = menu.addItem(withTitle: "透明度", action: nil, keyEquivalent: "")
-            label.isEnabled = false
-            let container = NSView(frame: NSRect(x: 0, y: 0, width: 204, height: 30))
-            let slider = NSSlider(value: opacity, minValue: 0.1, maxValue: 1,
-                                  target: self, action: #selector(changeOpacity(_:)))
-            slider.frame = NSRect(x: 12, y: 4, width: 180, height: 22)
-            slider.isContinuous = true
-            container.addSubview(slider)
-            let item = NSMenuItem()
-            item.view = container
-            menu.addItem(item)
-        } else {
-            add("选择窗口置顶…", action: #selector(chooseWindow), to: menu, key: "p")
-        }
-        menu.addItem(.separator())
-        add("检查更新…", action: #selector(openReleases), to: menu)
-        let quit = menu.addItem(withTitle: "退出 Pin", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        quit.target = NSApp
+    private func refresh() {
+        for (index, session) in sessions.enumerated() { session.setStackRank(sessions.count - index) }
+        manager.update(sessions)
+        statusItem?.button?.image = NSImage(systemSymbolName: sessions.isEmpty ? "pin" : "pin.fill",
+                                           accessibilityDescription: "窗口置顶管理")
     }
 
-    private func add(_ title: String, action: Selector, to menu: NSMenu, key: String = "") {
-        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
-        item.target = self
+    private func remove(_ id: CGWindowID) {
+        starts.removeValue(forKey: id)?.cancel()
+        sessions.first { $0.id == id }?.stop()
+        sessions.removeAll { $0.id == id }
+        refresh()
     }
 
-    @objc private func chooseWindow() {
-        NSApp.activate()
-        SCContentSharingPicker.shared.present(using: .window)
+    private func removeAll() {
+        starts.values.forEach { $0.cancel() }
+        starts.removeAll()
+        sessions.forEach { $0.stop() }
+        sessions.removeAll()
+        refresh()
     }
 
-    @objc private func unpin() {
-        selection?.cancel()
-        selection = nil
-        session?.stop()
-        session = nil
-        statusItem?.button?.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin")
+    private func move(_ id: CGWindowID, to row: Int) {
+        let order = WindowOrder.moving(sessions.map(\.id), id: id, to: row)
+        let byID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        sessions = order.compactMap { byID[$0] }
+        refresh()
     }
 
-    @objc private func changeOpacity(_ slider: NSSlider) {
-        opacity = WindowGeometry.opacity(slider.doubleValue)
-        UserDefaults.standard.set(opacity, forKey: "opacity")
-        session?.opacity = opacity
-    }
-
-    @objc private func openReleases() {
-        if let url = URL(string: "https://github.com/cut-hand/Pin/releases") { NSWorkspace.shared.open(url) }
-    }
-
-    private func pin(_ filter: SCContentFilter) {
-        guard let window = filter.includedWindows.first else { return }
-        unpin()
-        selection = Task { [weak self] in
-            guard let self else { return }
+    private func chooseWindow() {
+        guard !choosing else { return }
+        choosing = true
+        popover.performClose(nil)
+        Task {
+            defer { choosing = false }
             do {
-                let current = try PinSession(window: window, filter: filter, opacity: opacity)
-                session = current
-                current.onEnd = { [weak self, weak current] in
-                    guard let self, let current, self.session === current else { return }
-                    self.unpin()
+                let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+                let windows = content.windows.filter { window in
+                    window.windowLayer == 0 && window.frame.width > 50 && window.frame.height > 50 &&
+                    window.owningApplication?.processID != ProcessInfo.processInfo.processIdentifier &&
+                    !sessions.contains(where: { session in session.id == window.windowID })
+                }.sorted { ($0.owningApplication?.applicationName ?? "", $0.title ?? "") <
+                           ($1.owningApplication?.applicationName ?? "", $1.title ?? "") }
+                NSApp.activate()
+                let alert = NSAlert()
+                alert.messageText = "选择需要置顶的窗口"
+                guard !windows.isEmpty else {
+                    alert.informativeText = "没有可添加的窗口。已置顶窗口可在菜单栏中管理。"
+                    alert.runModal()
+                    return
                 }
-                try await current.start()
-                guard session === current, !Task.isCancelled else { current.stop(); return }
-                statusItem?.button?.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "已置顶")
+                alert.informativeText = "可多次添加窗口，每个窗口独立控制透明度和层级。"
+                let choices = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 28))
+                choices.addItems(withTitles: windows.map {
+                    "\($0.owningApplication?.applicationName ?? "应用") — \($0.title ?? "未命名窗口")"
+                })
+                alert.accessoryView = choices
+                alert.addButton(withTitle: "置顶此窗口")
+                alert.addButton(withTitle: "取消")
+                if alert.runModal() == .alertFirstButtonReturn, windows.indices.contains(choices.indexOfSelectedItem) {
+                    pin(windows[choices.indexOfSelectedItem])
+                }
             } catch {
-                guard !Task.isCancelled else { return }
-                unpin()
-                showError(error)
+                let alert = NSAlert()
+                alert.messageText = "需要屏幕录制权限"
+                alert.informativeText = "请在“系统设置 → 隐私与安全性 → 屏幕录制”中允许 Pin，然后重新打开应用。\n\n\(error.localizedDescription)"
+                alert.addButton(withTitle: "打开系统设置")
+                alert.addButton(withTitle: "取消")
+                if alert.runModal() == .alertFirstButtonReturn,
+                   let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                    NSWorkspace.shared.open(url)
+                }
             }
         }
     }
 
-    private func showError(_ error: any Error) {
-        let alert = NSAlert()
-        alert.messageText = "无法置顶窗口"
-        alert.informativeText = error.localizedDescription
-        alert.runModal()
-    }
-
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter,
-                                         for stream: SCStream?) {
-        let selection = PickerSelection(filter: filter)
-        Task { @MainActor [weak self] in self?.pin(selection.filter) }
-    }
-
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {}
-
-    nonisolated func contentSharingPickerStartDidFailWithError(_ error: any Error) {
-        Task { @MainActor [weak self] in self?.showError(error) }
+    private func pin(_ window: SCWindow) {
+        guard !sessions.contains(where: { $0.id == window.windowID }) else { return }
+        do {
+            let current = try PinSession(window: window, filter: SCContentFilter(desktopIndependentWindow: window), opacity: 1)
+            sessions.insert(current, at: 0)
+            current.onEnd = { [weak self, weak current] in
+                guard let self, let current, sessions.contains(where: { $0 === current }) else { return }
+                remove(current.id)
+            }
+            refresh()
+            starts[current.id] = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    if sessions.contains(where: { $0 === current }) { starts[current.id] = nil }
+                }
+                do {
+                    try await current.start()
+                    guard sessions.contains(where: { $0 === current }), !Task.isCancelled else { current.stop(); return }
+                    refresh()
+                } catch {
+                    guard sessions.contains(where: { $0 === current }), !Task.isCancelled else { return }
+                    remove(current.id)
+                    let alert = NSAlert()
+                    alert.messageText = "无法置顶窗口"
+                    alert.informativeText = error.localizedDescription
+                    alert.runModal()
+                }
+            }
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
     }
 }

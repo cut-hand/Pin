@@ -6,6 +6,7 @@ import ScreenCaptureKit
 final class MirrorView: NSView {
     let videoLayer = AVSampleBufferDisplayLayer()
     var onClick: (() -> Void)?
+    var onUnpin: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -27,6 +28,15 @@ final class MirrorView: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        let item = menu.addItem(withTitle: "取消置顶", action: #selector(unpin), keyEquivalent: "")
+        item.target = self
+        return menu
+    }
+
+    @objc private func unpin() { onUnpin?() }
 }
 
 // Screen buffers are delivered synchronously on DispatchQueue.main (see PinSession).
