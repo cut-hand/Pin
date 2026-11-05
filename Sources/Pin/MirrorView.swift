@@ -25,7 +25,15 @@ final class MirrorView: NSView {
         CATransaction.commit()
     }
 
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { rightMouseDown(with: event) }
+        else { onClick?() }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = menu(for: event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 

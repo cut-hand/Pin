@@ -26,7 +26,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             scripts/build-release.sh "$GITHUB_REF_NAME"
           else
-            scripts/build-release.sh v0.1.5
+            scripts/build-release.sh v0.1.6
           fi
 
       - uses: actions/upload-artifact@v4
@@ -46,7 +46,7 @@ jobs:
             gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "Pin $GITHUB_REF_NAME" \
-              --notes-file docs/release-notes/v0.1.5.md \
+              --notes-file docs/release-notes/v0.1.6.md \
               build/releases/"$GITHUB_REF_NAME"/*.zip \
               build/releases/"$GITHUB_REF_NAME"/*.sha256
           fi

@@ -9,7 +9,7 @@ import ScreenCaptureKit
 enum PinApp {
     static func main() {
         if CommandLine.arguments.contains("--version") {
-            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.5")
+            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.6")
             return
         }
         let app = NSApplication.shared

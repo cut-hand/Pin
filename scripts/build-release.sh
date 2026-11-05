@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-release_tag="${1:-v0.1.5}"
+release_tag="${1:-v0.1.6}"
 if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Expected a version such as v0.1.5" >&2
+    echo "Expected a version such as v0.1.6" >&2
     exit 1
 fi
 release_dir="$repo_root/build/releases/$release_tag"
