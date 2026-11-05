@@ -94,8 +94,9 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
 
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("window")))
         table.headerView = nil
-        table.rowHeight = 64
-        table.intercellSpacing = NSSize(width: 0, height: 4)
+        table.style = .plain
+        table.rowHeight = 54
+        table.intercellSpacing = NSSize(width: 0, height: 2)
         table.backgroundColor = .clear
         table.selectionHighlightStyle = .none
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
@@ -114,7 +115,9 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
-        scroll.frame = NSRect(x: 10, y: 10, width: 340, height: 174)
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets()
+        scroll.frame = NSRect(x: 10, y: 10, width: 340, height: 184)
         scroll.autoresizingMask = [.width, .height]
         view.addSubview(scroll)
         emptyLabel.alignment = .center
@@ -134,7 +137,7 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         self.sessions = sessions
         heading.stringValue = "置顶窗口 · \(sessions.count)"
         emptyLabel.isHidden = !sessions.isEmpty
-        preferredContentSize = NSSize(width: 360, height: 62 + min(340, max(68, sessions.count * 68)))
+        preferredContentSize = NSSize(width: 360, height: 52 + min(336, max(56, sessions.count * 56)))
         table.reloadData()
     }
 
@@ -143,8 +146,8 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let session = sessions[row]
         let width = tableColumn?.width ?? 340
-        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: width, height: 64))
-        let grip = NSImageView(frame: NSRect(x: 4, y: 35, width: 16, height: 18))
+        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: width, height: 54))
+        let grip = NSImageView(frame: NSRect(x: 4, y: 29, width: 16, height: 18))
         grip.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "拖动调整层级")
         grip.contentTintColor = .tertiaryLabelColor
         grip.toolTip = "上下拖动此行调整层级，上方优先"
@@ -152,13 +155,13 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         let title = NSTextField(labelWithString: session.title)
         title.font = .systemFont(ofSize: 12, weight: .medium)
         title.lineBreakMode = .byTruncatingTail
-        title.frame = NSRect(x: 28, y: 33, width: max(100, width - 66), height: 22)
+        title.frame = NSRect(x: 28, y: 28, width: max(100, width - 66), height: 22)
         title.toolTip = session.title
         cell.addSubview(title)
         let remove = IconButton("xmark", help: "取消此窗口的置顶") { [weak self] in self?.onRemove?(session.id) }
-        remove.frame = NSRect(x: width - 30, y: 31, width: 26, height: 26)
+        remove.frame = NSRect(x: width - 30, y: 25, width: 26, height: 26)
         cell.addSubview(remove)
-        let opacityIcon = NSImageView(frame: NSRect(x: 28, y: 10, width: 14, height: 16))
+        let opacityIcon = NSImageView(frame: NSRect(x: 28, y: 6, width: 14, height: 16))
         opacityIcon.image = NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: "不透明度")
         opacityIcon.contentTintColor = .secondaryLabelColor
         opacityIcon.toolTip = "窗口不透明度"
@@ -167,14 +170,14 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         label.textColor = .secondaryLabelColor
         label.alignment = .right
-        label.frame = NSRect(x: width - 46, y: 8, width: 40, height: 18)
+        label.frame = NSRect(x: width - 46, y: 4, width: 40, height: 18)
         label.toolTip = "当前窗口的不透明度"
         cell.addSubview(label)
         let slider = OpacitySlider(value: session.opacity) { [weak session, weak label] value in
             session?.opacity = WindowGeometry.opacity(value)
             label?.stringValue = "\(Int(value * 100))%"
         }
-        slider.frame = NSRect(x: 50, y: 7, width: max(100, width - 106), height: 22)
+        slider.frame = NSRect(x: 50, y: 3, width: max(100, width - 106), height: 22)
         cell.addSubview(slider)
         let separator = NSBox(frame: NSRect(x: 28, y: 0, width: width - 34, height: 1))
         separator.boxType = .separator
