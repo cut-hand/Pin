@@ -80,15 +80,15 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 236))
         let add = IconButton("plus", help: "添加置顶窗口") { [weak self] in self?.onAdd?() }
-        add.frame = NSRect(x: 12, y: 198, width: 28, height: 28)
+        add.frame = NSRect(x: 250, y: 198, width: 28, height: 28)
         add.autoresizingMask = [.minYMargin]
         view.addSubview(add)
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
-        heading.frame = NSRect(x: 48, y: 201, width: 245, height: 22)
+        heading.frame = NSRect(x: 14, y: 201, width: 222, height: 22)
         heading.autoresizingMask = [.minYMargin]
         view.addSubview(heading)
         let clear = IconButton("pin.slash", help: "取消全部窗口的置顶") { [weak self] in self?.onRemoveAll?() }
-        clear.frame = NSRect(x: 318, y: 198, width: 28, height: 28)
+        clear.frame = NSRect(x: 284, y: 198, width: 28, height: 28)
         clear.autoresizingMask = [.minYMargin]
         view.addSubview(clear)
 
@@ -114,7 +114,7 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
-        scroll.frame = NSRect(x: 10, y: 42, width: 340, height: 142)
+        scroll.frame = NSRect(x: 10, y: 10, width: 340, height: 174)
         scroll.autoresizingMask = [.width, .height]
         view.addSubview(scroll)
         emptyLabel.alignment = .center
@@ -123,19 +123,9 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         emptyLabel.autoresizingMask = [.minYMargin, .maxYMargin]
         view.addSubview(emptyLabel)
 
-        let updates = IconButton("arrow.clockwise", help: "检查更新") {
-            if let url = URL(string: "https://github.com/cut-hand/Pin/releases") { NSWorkspace.shared.open(url) }
-        }
-        updates.frame = NSRect(x: 12, y: 7, width: 28, height: 28)
-        view.addSubview(updates)
-        let hint = NSTextField(labelWithString: "拖动排序 · 上方优先")
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        hint.alignment = .center
-        hint.frame = NSRect(x: 50, y: 12, width: 260, height: 18)
-        view.addSubview(hint)
         let quit = IconButton("power", help: "退出 Pin") { NSApp.terminate(nil) }
-        quit.frame = NSRect(x: 318, y: 7, width: 28, height: 28)
+        quit.frame = NSRect(x: 318, y: 198, width: 28, height: 28)
+        quit.autoresizingMask = [.minYMargin]
         view.addSubview(quit)
     }
 
@@ -144,7 +134,7 @@ final class WindowManagerViewController: NSViewController, NSTableViewDataSource
         self.sessions = sessions
         heading.stringValue = "置顶窗口 · \(sessions.count)"
         emptyLabel.isHidden = !sessions.isEmpty
-        preferredContentSize = NSSize(width: 360, height: 94 + min(340, max(68, sessions.count * 68)))
+        preferredContentSize = NSSize(width: 360, height: 62 + min(340, max(68, sessions.count * 68)))
         table.reloadData()
     }
 

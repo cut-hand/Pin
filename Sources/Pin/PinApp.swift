@@ -9,7 +9,7 @@ import ScreenCaptureKit
 enum PinApp {
     static func main() {
         if CommandLine.arguments.contains("--version") {
-            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.6")
+            print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.7")
             return
         }
         let app = NSApplication.shared
@@ -53,8 +53,16 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func refresh() {
         for (index, session) in sessions.enumerated() { session.setStackRank(sessions.count - index) }
         manager.update(sessions)
-        statusItem?.button?.image = NSImage(systemSymbolName: sessions.isEmpty ? "pin" : "pin.fill",
-                                           accessibilityDescription: "窗口置顶管理")
+        if let url = Bundle.main.url(forResource: "MenuBarTemplate", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            image.isTemplate = true
+            statusItem?.button?.image = image
+        } else {
+            statusItem?.button?.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin")
+        }
+        statusItem?.button?.toolTip = "Pin · 已置顶 \(sessions.count) 个窗口"
+        statusItem?.button?.setAccessibilityLabel("窗口置顶管理")
     }
 
     private func remove(_ id: CGWindowID) {

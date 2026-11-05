@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-release_tag="${1:-v0.1.6}"
+release_tag="${1:-v0.1.7}"
 if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Expected a version such as v0.1.6" >&2
+    echo "Expected a version such as v0.1.7" >&2
     exit 1
 fi
 release_dir="$repo_root/build/releases/$release_tag"
@@ -23,6 +23,7 @@ binary_dir="$(swift build -c release --arch arm64 --show-bin-path)"
 install -m 755 "$binary_dir/Pin" "$app_path/Contents/MacOS/Pin"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${release_tag#v}" "$app_path/Contents/Info.plist"
+cp Resources/Brand/MenuBarTemplate.png "$app_path/Contents/Resources/MenuBarTemplate.png"
 iconutil -c icns Resources/AppIcon.iconset -o "$app_path/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$app_path/Contents/PkgInfo"
 
